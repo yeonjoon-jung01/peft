@@ -22,6 +22,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -136,6 +137,27 @@ ALL_CONFIGS = [
             "lora_dropout": 0.05,
             "bias": "none",
             "trainable_token_indices": [0, 1, 3],
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "gralora_k": 2,
+            "gralora_alpha": 16,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 16,
+            "gralora_k": 2,
+            "hybrid_r": 4,
+            "gralora_alpha": 32,
         },
     ),
     (

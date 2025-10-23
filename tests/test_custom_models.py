@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -160,6 +161,21 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    ),
+    ###########
+    # GraLoRA #
+    ###########
+    (
+        "Vanilla MLP 1 GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 8, "gralora_k": 2, "gralora_alpha": 16},
+    ),
+    (
+        "Vanilla MLP 2 Hybrid GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 16, "gralora_k": 2, "hybrid_r": 4, "gralora_alpha": 32},
     ),
     #######
     # IA³ #

@@ -73,6 +73,23 @@ class GraloraLayer(BaseTunerLayer):
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if hybrid_r < 0:
+            raise ValueError(f"`hybrid_r` should be a non-negative integer value but the value passed is {hybrid_r}")
+        if hybrid_r >= r:
+            raise ValueError(
+                f"`hybrid_r` should be less than `r` but got hybrid_r={hybrid_r} and r={r}. "
+                "The effective GraLoRA rank would be non-positive."
+            )
+        if self.in_features % gralora_k != 0:
+            raise ValueError(
+                f"in_features ({self.in_features}) must be divisible by gralora_k ({gralora_k}). "
+                f"Cannot evenly partition {self.in_features} features into {gralora_k} blocks."
+            )
+        if self.out_features % gralora_k != 0:
+            raise ValueError(
+                f"out_features ({self.out_features}) must be divisible by gralora_k ({gralora_k}). "
+                f"Cannot evenly partition {self.out_features} features into {gralora_k} blocks."
+            )
 
         self.r[adapter_name] = r
         self.gralora_alpha[adapter_name] = gralora_alpha

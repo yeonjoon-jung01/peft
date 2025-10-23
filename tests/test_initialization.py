@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     EvaConfig,
+    GraloraConfig,
     IA3Config,
     LoftQConfig,
     LoKrConfig,
@@ -4930,3 +4931,140 @@ class TestWeightTying:
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
             "LM head is not of type nn.linear"
         )
+
+
+class TestGraloraInitialization:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 2, bias=bias)
+
+            def forward(self, x):
+                x = self.relu(self.lin0(x))
+                x = self.lin1(x)
+                return x
+
+        return MLP(bias=bias).to(self.torch_device)
+
+    def test_gralora_rank_must_be_positive(self):
+        """Test that r=0 or r<0 raises ValueError"""
+        model = self.get_model()
+
+        # Test r=0
+        config = GraloraConfig(target_modules=["lin1"], r=0, gralora_k=2)
+        with pytest.raises(ValueError, match="`r` should be a positive integer"):
+            get_peft_model(model, config)
+
+        # Test r<0
+        config = GraloraConfig(target_modules=["lin1"], r=-1, gralora_k=2)
+        with pytest.raises(ValueError, match="`r` should be a positive integer"):
+            get_peft_model(model, config)
+
+    def test_gralora_hybrid_r_must_be_non_negative(self):
+        """Test that negative hybrid_r raises ValueError"""
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, hybrid_r=-1)
+
+        with pytest.raises(ValueError, match="`hybrid_r` should be a non-negative integer"):
+            get_peft_model(model, config)
+
+    def test_gralora_hybrid_r_must_be_less_than_r(self):
+        """Test that hybrid_r >= r raises ValueError"""
+        model = self.get_model()
+
+        # Test hybrid_r == r
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, hybrid_r=8)
+        with pytest.raises(ValueError, match="`hybrid_r` should be less than `r`"):
+            get_peft_model(model, config)
+
+        # Test hybrid_r > r
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, hybrid_r=10)
+        with pytest.raises(ValueError, match="`hybrid_r` should be less than `r`"):
+            get_peft_model(model, config)
+
+    def test_gralora_rank_divisibility_by_k(self):
+        """Test that (r - hybrid_r) must be divisible by gralora_k"""
+        model = self.get_model()
+
+        # r=15, hybrid_r=0, k=4 -> gralora_rank=15, 15 % 4 != 0
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=15,
+            gralora_k=4,
+            hybrid_r=0,
+        )
+        with pytest.raises(AssertionError, match="r should be divisible by gralora_k"):
+            get_peft_model(model, config)
+
+        # r=16, hybrid_r=3, k=4 -> gralora_rank=13, 13 % 4 != 0
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=16,
+            gralora_k=4,
+            hybrid_r=3,
+        )
+        with pytest.raises(AssertionError, match="r should be divisible by gralora_k"):
+            get_peft_model(model, config)
+
+    def test_gralora_in_features_divisibility(self):
+        """Test that in_features must be divisible by gralora_k"""
+        model = self.get_model()  # lin1 has in_features=20
+
+        # k=3: 20 % 3 != 0
+        config = GraloraConfig(target_modules=["lin1"], r=9, gralora_k=3)
+        with pytest.raises(ValueError, match="in_features.*must be divisible by gralora_k"):
+            get_peft_model(model, config)
+
+    def test_gralora_out_features_divisibility(self):
+        """Test that out_features must be divisible by gralora_k"""
+        model = self.get_model()  # lin1 has out_features=2
+
+        # k=3: 2 % 3 != 0
+        config = GraloraConfig(target_modules=["lin1"], r=9, gralora_k=3)
+        with pytest.raises(ValueError, match="out_features.*must be divisible by gralora_k"):
+            get_peft_model(model, config)
+
+    def test_gralora_multiple_adapters_with_bias_raises(self):
+        """Test that adding multiple adapters with bias != 'none' raises ValueError"""
+        model = self.get_model()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, bias="all")
+        model = get_peft_model(model, config1)
+
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, bias="all")
+        with pytest.raises(ValueError, match="supports only 1 adapter with bias"):
+            model.add_adapter("adapter2", config2)
+
+    def test_gralora_disable_adapter_layers_warns_with_bias(self):
+        """Test that disable_adapter_layers warns when bias is configured"""
+        model = self.get_model()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            bias="all",
+        )
+        model = get_peft_model(model, config)
+
+        with pytest.warns(UserWarning, match="disabling adapter layers with bias"):
+            model.disable_adapter_layers()
+
+    def test_gralora_set_adapter_warns_when_merged(self):
+        """Test that set_adapter warns when model is merged"""
+        model = self.get_model()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(model, config1, adapter_name="adapter1")
+
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model.add_adapter("adapter2", config2)
+
+        # Merge first adapter
+        model.merge_adapter()
+
+        # Setting adapter should warn
+        with pytest.warns(UserWarning, match="Adapter cannot be set when the model is merged"):
+            model.set_adapter("adapter2")
